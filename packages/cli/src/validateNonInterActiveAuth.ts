@@ -36,7 +36,11 @@ export async function validateNonInteractiveAuth(
   if (process.env['BYPASS_AUTH'] === 'true') {
     console.log('Non-interactive authentication bypassed via BYPASS_AUTH environment variable.');
     
-    // 直接返回配置，不进行认证刷新
+    // 如果使用自定义模型，需要初始化 GeminiClient
+    if (process.env['USE_CUSTOM_LLM'] === 'true') {
+      await nonInteractiveConfig.refreshAuth(AuthType.CUSTOM_LLM_API);
+    }
+    
     return nonInteractiveConfig;
   }
   

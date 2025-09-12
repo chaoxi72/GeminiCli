@@ -23,10 +23,10 @@ function isInitAuth(settings: LoadedSettings) {
   if (process.env['USE_CUSTOM_LLM'] && process.env['USE_CUSTOM_LLM'] !== 'false') {
     return false;
   }
-  if (settings.merged.security?.auth?.selectedType !== AuthType.CUSTOM_LLM_API) {
-    return !settings.merged.security?.auth?.selectedType === undefined;
+  if (settings.merged.security?.auth?.selectedType === undefined) {
+    return true;
   }
-  return true;
+  return false;
 }
 
 export const useAuthCommand = (
@@ -52,10 +52,16 @@ export const useAuthCommand = (
       // 检查是否设置了绕过认证
       if (process.env['BYPASS_AUTH'] === 'true') {
         console.log('Authentication bypassed via BYPASS_AUTH environment variable.');
-        // 如果使用自定义模型，自动设置认证类型
+        // 如果使用自定义模型，自动设置认证类型并初始化客户端
         if (process.env['USE_CUSTOM_LLM'] === 'true') {
           settings.setValue(SettingScope.User, 'security.auth.selectedType', AuthType.CUSTOM_LLM_API);
           console.log('Using custom LLM API as specified.');
+          // 确保 GeminiClient 被初始化
+          try {
+            await config.refreshAuth(AuthType.CUSTOM_LLM_API);
+          } catch (e) {
+            console.error('Failed to initialize GeminiClient:', getErrorMessage(e));
+          }
         }
         return;
       }
