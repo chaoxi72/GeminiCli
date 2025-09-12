@@ -1,15 +1,15 @@
 {
-  "name": "@google/gemini-cli",
-  "version": "0.2.2",
-  "description": "Gemini CLI",
+  "name": "himile-cli-core",
+  "version": "1.0.0",
+  "description": "Himile CLI Core Package",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/google-gemini/gemini-cli.git"
+    "url": "git+https://github.com/chaoxi72/gemini-cli.git"
   },
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "gemini": "dist/index.js"
+    "himile": "dist/index.js"
   },
   "scripts": {
     "build": "node ../../scripts/build_package.js",
@@ -28,7 +28,7 @@
     "sandboxImageUri": "us-docker.pkg.dev/gemini-code-dev/gemini-cli/sandbox:0.2.2"
   },
   "dependencies": {
-    "@google/gemini-cli-core": "file:../core",
+    "himile-cli-core-lib": "file:../core",
     "@google/genai": "1.13.0",
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^1.15.1",
@@ -59,7 +59,7 @@
   },
   "devDependencies": {
     "@babel/runtime": "^7.27.6",
-    "@google/gemini-cli-test-utils": "file:../test-utils",
+    "himile-cli-test-utils": "file:../test-utils",
     "@testing-library/react": "^16.3.0",
     "@types/command-exists": "^1.2.3",
     "@types/diff": "^7.0.2",

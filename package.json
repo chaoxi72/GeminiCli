@@ -1,6 +1,10 @@
 {
-  "name": "@google/gemini-cli",
-  "version": "0.2.2",
+  "name": "himile-cli",
+  "version": "1.0.0",
+  "description": "A custom enhanced version of Google Gemini CLI with additional features",
+  "keywords": ["gemini", "ai", "cli", "llm", "custom", "chat", "assistant"],
+  "author": "Your Name <your.email@example.com>",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -8,10 +12,10 @@
   "workspaces": [
     "packages/*"
   ],
-  "private": "true",
+  "private": false,
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/google-gemini/gemini-cli.git"
+    "url": "git+https://github.com/chaoxi72/gemini-cli.git"
   },
   "config": {
     "sandboxImageUri": "us-docker.pkg.dev/gemini-code-dev/gemini-cli/sandbox:0.2.2"
@@ -50,10 +54,14 @@
     "release:version": "node scripts/version.js",
     "telemetry": "node scripts/telemetry.js",
     "check:lockfile": "node scripts/check-lockfile.js",
-    "clean": "node scripts/clean.js"
+    "clean": "node scripts/clean.js",
+    "publish:prepare": "node publish.js",
+    "publish:local": "npm pack && echo '本地包已生成，运行: npm install -g ./himile-cli-1.0.0.tgz'",
+    "publish:npm": "npm publish --access public",
+    "build-and-pack": "node build-and-pack.js"
   },
   "bin": {
-    "gemini": "bundle/gemini.js"
+    "himile": "bundle/gemini.js"
   },
   "files": [
     "bundle/",

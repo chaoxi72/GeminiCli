@@ -7,11 +7,11 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { LoadedSettings } from '../../config/settings.js';
 import { SettingScope } from '../../config/settings.js';
-import { AuthType, type Config } from '@google/gemini-cli-core';
+import { AuthType, type Config } from 'himile-cli-core-lib';
 import {
   clearCachedCredentialFile,
   getErrorMessage,
-} from '@google/gemini-cli-core';
+} from 'himile-cli-core-lib';
 import { runExitCleanup } from '../../utils/cleanup.js';
 
 function isInitAuth(settings: LoadedSettings) {
@@ -56,11 +56,11 @@ export const useAuthCommand = (
         if (process.env['USE_CUSTOM_LLM'] === 'true') {
           settings.setValue(SettingScope.User, 'security.auth.selectedType', AuthType.CUSTOM_LLM_API);
           console.log('Using custom LLM API as specified.');
-          // 确保 GeminiClient 被初始化
+          // 确保 HimileClient 被初始化
           try {
             await config.refreshAuth(AuthType.CUSTOM_LLM_API);
           } catch (e) {
-            console.error('Failed to initialize GeminiClient:', getErrorMessage(e));
+            console.error('Failed to initialize HimileClient:', getErrorMessage(e));
           }
         }
         return;
@@ -100,7 +100,7 @@ export const useAuthCommand = (
           console.log(
             `
 ----------------------------------------------------------------
-Logging in with Google... Please restart Gemini CLI to continue.
+Logging in with Google... Please restart Himile CLI to continue.
 ----------------------------------------------------------------
             `,
           );

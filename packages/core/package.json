@@ -1,10 +1,10 @@
 {
-  "name": "@google/gemini-cli-core",
-  "version": "0.2.2",
-  "description": "Gemini CLI Core",
+  "name": "himile-cli-core-lib",
+  "version": "1.0.0",
+  "description": "Himile CLI Core Library",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/google-gemini/gemini-cli.git"
+    "url": "git+https://github.com/chaoxi72/gemini-cli.git"
   },
   "type": "module",
   "main": "dist/index.js",

@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { Config } from '@google/gemini-cli-core';
-import { AuthType } from '@google/gemini-cli-core';
+import type { Config } from 'himile-cli-core-lib';
+import { AuthType } from 'himile-cli-core-lib';
 import { USER_SETTINGS_PATH } from './config/settings.js';
 import { validateAuthMethod } from './config/auth.js';
 
@@ -36,7 +36,7 @@ export async function validateNonInteractiveAuth(
   if (process.env['BYPASS_AUTH'] === 'true') {
     console.log('Non-interactive authentication bypassed via BYPASS_AUTH environment variable.');
     
-    // 如果使用自定义模型，需要初始化 GeminiClient
+    // 如果使用自定义模型，需要初始化 HimileClient
     if (process.env['USE_CUSTOM_LLM'] === 'true') {
       await nonInteractiveConfig.refreshAuth(AuthType.CUSTOM_LLM_API);
     }

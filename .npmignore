@@ -1,0 +1,63 @@
+# 源代码和开发文件
+packages/*/src/
+packages/*/coverage/
+packages/*/node_modules/
+packages/*/dist/
+packages/*/.turbo/
+packages/*/junit.xml
+packages/*/test-setup.ts
+packages/*/vitest.config.ts
+packages/*/tsconfig.json
+
+# 开发和测试文件
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__/
+test/
+tests/
+integration-tests/
+scripts/tests/
+
+# 构建和配置文件
+.github/
+.vscode/
+.idea/
+*.log
+*.tgz
+node_modules/
+coverage/
+.turbo/
+.env*
+.DS_Store
+Thumbs.db
+
+# 开发配置
+eslint.config.js
+vitest.config.ts
+tsconfig.json
+esbuild.config.js
+Dockerfile
+Makefile
+.dockerignore
+.gitignore
+
+# 文档（保留主要的）
+docs/
+CONTRIBUTING.md
+ROADMAP.md
+SECURITY.md
+
+# 临时文件
+*.tmp
+*.temp
+.cache/
+dist/
+
+# 保留这些文件
+!bundle/
+!README.md
+!README-CUSTOM.md
+!LICENSE
+!package.json
