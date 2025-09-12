@@ -5,7 +5,8 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import type { LoadedSettings, SettingScope } from '../../config/settings.js';
+import type { LoadedSettings } from '../../config/settings.js';
+import { SettingScope } from '../../config/settings.js';
 import { AuthType, type Config } from '@google/gemini-cli-core';
 import {
   clearCachedCredentialFile,
@@ -53,7 +54,7 @@ export const useAuthCommand = (
         console.log('Authentication bypassed via BYPASS_AUTH environment variable.');
         // 如果使用自定义模型，自动设置认证类型
         if (process.env['USE_CUSTOM_LLM'] === 'true') {
-          settings.setValue('user' as SettingScope, 'security.auth.selectedType', AuthType.CUSTOM_LLM_API);
+          settings.setValue(SettingScope.User, 'security.auth.selectedType', AuthType.CUSTOM_LLM_API);
           console.log('Using custom LLM API as specified.');
         }
         return;
