@@ -58,7 +58,8 @@
     "publish:prepare": "node publish.js",
     "publish:local": "npm pack && echo '本地包已生成，运行: npm install -g ./himile-cli-1.0.0.tgz'",
     "publish:npm": "npm publish --access public",
-    "build-and-pack": "node build-and-pack.js"
+    "build-and-pack": "node build-and-pack.js",
+    "test-offline": "node test-offline-install.js"
   },
   "bin": {
     "himile": "bundle/gemini.js"
