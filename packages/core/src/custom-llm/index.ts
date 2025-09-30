@@ -19,6 +19,7 @@ import type { ContentGenerator } from '../core/contentGenerator.js';
 import type { CustomLLMContentGeneratorConfig, ToolCallMap } from './types.js';
 import { extractToolFunctions } from './util.js';
 import { ModelConverter } from './converter.js';
+import { RequestLogger } from './requestLogger.js';
 
 export class CustomLLMContentGenerator implements ContentGenerator {
   private model: OpenAI;
@@ -28,6 +29,7 @@ export class CustomLLMContentGenerator implements ContentGenerator {
   private temperature: number = Number(process.env['CUSTOM_LLM_TEMPERATURE'] || 0);
   private maxTokens: number = Number(process.env['CUSTOM_LLM_MAX_TOKENS'] || 8192);
   private topP: number = Number(process.env['CUSTOM_LLM_TOP_P'] || 1);
+  private requestLogger: RequestLogger = new RequestLogger();
   private config: CustomLLMContentGeneratorConfig = {
     model: this.modelName,
     temperature: this.temperature,
@@ -66,20 +68,46 @@ export class CustomLLMContentGenerator implements ContentGenerator {
   ): Promise<AsyncGenerator<GenerateContentResponse>> {
     const messages = ModelConverter.toOpenAIMessages(request);
     const tools = extractToolFunctions(request.config) || [];
-    const stream = await this.model.chat.completions.create({
+    const requestConfig = {
       messages,
       stream: true,
       tools,
       stream_options: { include_usage: true },
       ...this.config,
-    });
+    };
+
+    // 记录请求日志并获取请求ID
+    const requestId = await this.requestLogger.logRequest(
+      `${this.baseURL}/chat/completions`,
+      this.modelName,
+      requestConfig,
+      this.baseURL
+    );
+
+    const stream = await this.model.chat.completions.create(requestConfig);
     const map: ToolCallMap = new Map();
+    const logger = this.requestLogger;
+    
     return (async function* (): AsyncGenerator<GenerateContentResponse> {
-      for await (const chunk of stream) {
+      const streamChunks: any[] = [];
+      let finalResponse: GenerateContentResponse | null = null;
+      
+      for await (const chunk of stream as any) {
+        streamChunks.push(chunk);
         const { response } = ModelConverter.processStreamChunk(chunk, map);
         if (response) {
+          finalResponse = response;
           yield response;
         }
+      }
+      
+      // 流式响应结束后，记录完整的响应日志
+      if (streamChunks.length > 0) {
+        await logger.logResponse(requestId, {
+          streamChunks,
+          finalResponse,
+          totalChunks: streamChunks.length
+        });
       }
     })();
   }
@@ -113,10 +141,25 @@ export class CustomLLMContentGenerator implements ContentGenerator {
     if (isJsonRequired) {
       completionConfig.response_format = { type: "json_object" };
     }
+
+    // 记录请求日志并获取请求ID
+    const requestId = await this.requestLogger.logRequest(
+      `${this.baseURL}/chat/completions`,
+      this.modelName,
+      completionConfig,
+      this.baseURL
+    );
     
     const completion = await this.model.chat.completions.create(completionConfig);
+    const response = ModelConverter.toGeminiResponse(completion);
 
-    return ModelConverter.toGeminiResponse(completion);
+    // 记录响应日志
+    await this.requestLogger.logResponse(requestId, {
+      rawCompletion: completion,
+      convertedResponse: response
+    });
+
+    return response;
   }
 
   /**
