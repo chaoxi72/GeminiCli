@@ -8,54 +8,89 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-export interface RequestLogEntry {
-  requestId: string;
-  timestamp: string;
-  url: string;
-  modelName: string;
-  requestData: any;
-  vllmConfig: {
-    deploymentFramework: 'vllm';
-    endpoint: string;
-    modelPath: string;
+export interface ToolCall {
+  id: string;
+  function: {
+    name: string;
+    arguments: string;
   };
 }
 
-export interface ResponseLogEntry {
-  requestId: string;
-  timestamp: string;
-  responseData: {
-    content?: string;           // 主要回答内容
-    thinking?: string;          // 思考内容
-    toolCalls?: Array<{         // 工具调用内容
-      name: string;
-      arguments: any;
-      result?: any;
+export interface ToolResponse {
+  tool_call_id: string;
+  role: "function";
+  name: string;
+  content: string;
+}
+
+export interface LogEntry {
+  timestamp: string;                    // 请求时间，格式：YYYY-MM-DD hh:mm:ss
+  request: {
+    id: string;                         // 唯一请求ID，便于追踪
+    url: string;                        // 请求地址
+    model: string;                      // 请求的模型名称
+    stream: boolean;                    // 是否流式返回
+    function_call: boolean;             // 是否包含function call
+    payload: {                          // 请求构造的具体数据
+      messages: Array<{
+        role: string;
+        content: string;
+      }>;
+      tools?: Array<{
+        type: "function";
+        function: {
+          name: string;
+          description: string;
+          parameters: any;
+        };
+      }>;
+      tool_choice?: "auto" | "none" | string;
+      temperature?: number;
+      max_tokens?: number;
+      [key: string]: any;               // 其他参数
+    };
+  };
+  response: {
+    status: number;                     // HTTP状态
+    latency_ms: number;                 // 请求耗时（毫秒）
+    usage?: {                           // token 使用统计
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
+    choices: Array<{
+      index: number;
+      finish_reason: string;            // 结束原因
+      message: {
+        role: "assistant";              // 消息角色
+        reasoning_content?: string;     // 模型的思考 / 推理内容
+        content?: string;               // 最终回答的文本内容
+        tool_calls?: ToolCall[];        // 工具调用意图
+      };
     }>;
-    finishReason?: string;      // 完成原因
+    tool_responses?: ToolResponse[];    // 工具调用返回结果
+    raw?: string;                       // 保留原始响应，方便调试
   };
 }
 
 export class RequestLogger {
-  private requestLogFilePath: string;
-  private responseLogFilePath: string;
+  private logFilePath: string;
 
   constructor() {
-    // 在用户临时目录下创建日志文件
+    // 在用户临时目录下创建统一日志文件
     const tempDir = os.tmpdir();
-    this.requestLogFilePath = path.join(tempDir, 'request_log.json');
-    this.responseLogFilePath = path.join(tempDir, 'response_log.json');
+    this.logFilePath = path.join(tempDir, 'llm_request_log.json');
   }
 
   /**
    * 生成唯一的请求ID
    */
   private generateRequestId(): string {
-    return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    return `req-${Date.now()}${Math.random().toString(36).substr(2, 9)}`;
   }
 
   /**
-   * 格式化时间为 2024/09/20: 17:24:10 格式
+   * 格式化时间为 YYYY-MM-DD hh:mm:ss 格式
    */
   private formatTimestamp(): string {
     const now = new Date();
@@ -65,171 +100,200 @@ export class RequestLogger {
     const hours = String(now.getHours()).padStart(2, '0');
     const minutes = String(now.getMinutes()).padStart(2, '0');
     const seconds = String(now.getSeconds()).padStart(2, '0');
-    return `${year}/${month}/${day}: ${hours}:${minutes}:${seconds}`;
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   }
 
   /**
-   * 从响应中提取有意义的内容（回答、思考、工具调用）
-   * 专门针对vLLM部署框架优化
+   * 从响应数据中提取并格式化为新的日志格式
    */
-  private extractMeaningfulContent(responseData: any): ResponseLogEntry['responseData'] {
-    const extracted: ResponseLogEntry['responseData'] = {};
+  private extractResponseData(responseData: any, latencyMs: number): LogEntry['response'] {
+    const response: LogEntry['response'] = {
+      status: 200, // 默认为成功状态
+      latency_ms: latencyMs,
+      choices: []
+    };
+
+    // 提取usage信息
+    if (responseData.usage || responseData.convertedResponse?.usage) {
+      const usage = responseData.usage || responseData.convertedResponse.usage;
+      response.usage = {
+        prompt_tokens: usage.promptTokens || usage.prompt_tokens,
+        completion_tokens: usage.completionTokens || usage.completion_tokens,
+        total_tokens: usage.totalTokens || usage.total_tokens
+      };
+    }
 
     // 处理转换后的Gemini响应格式
     if (responseData.convertedResponse?.candidates?.[0]) {
       const candidate = responseData.convertedResponse.candidates[0];
-      
-      // 提取主要内容
+      const choice: LogEntry['response']['choices'][0] = {
+        index: 0,
+        finish_reason: candidate.finishReason || 'stop',
+        message: {
+          role: 'assistant'
+        }
+      };
+
+      // 提取内容和思考
       if (candidate.content?.parts) {
         const textParts = candidate.content.parts
           .filter((part: any) => part.text)
           .map((part: any) => part.text)
           .join('\n');
+        
         if (textParts.trim()) {
           // 检查是否包含思考内容（通常在<thinking>标签内）
           const thinkingMatch = textParts.match(/<thinking>([\s\S]*?)<\/thinking>/);
           if (thinkingMatch) {
-            extracted.thinking = thinkingMatch[1].trim();
+            choice.message.reasoning_content = thinkingMatch[1].trim();
             // 移除思考内容，保留实际回答
             const contentWithoutThinking = textParts.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
             if (contentWithoutThinking) {
-              extracted.content = contentWithoutThinking;
+              choice.message.content = contentWithoutThinking;
             }
           } else {
-            extracted.content = textParts.trim();
+            choice.message.content = textParts.trim();
           }
         }
-      }
 
-      // 提取工具调用
-      if (candidate.content?.parts) {
+        // 提取工具调用
         const toolCalls = candidate.content.parts
           .filter((part: any) => part.functionCall)
-          .map((part: any) => ({
-            name: part.functionCall.name,
-            arguments: part.functionCall.args,
+          .map((part: any, index: number) => ({
+            id: `chatcmpl-tool-${Date.now()}-${index}`,
+            function: {
+              name: part.functionCall.name,
+              arguments: JSON.stringify(part.functionCall.args)
+            }
           }));
+        
         if (toolCalls.length > 0) {
-          extracted.toolCalls = toolCalls;
+          choice.message.tool_calls = toolCalls;
         }
       }
 
-      // 提取完成原因
-      if (candidate.finishReason) {
-        extracted.finishReason = candidate.finishReason;
-      }
+      response.choices.push(choice);
     }
-
-    // 处理原始OpenAI格式（vLLM通常使用OpenAI兼容格式）
-    if (responseData.rawCompletion?.choices?.[0]) {
+    // 处理原始OpenAI格式
+    else if (responseData.rawCompletion?.choices?.[0]) {
       const choice = responseData.rawCompletion.choices[0];
-      
-      // 如果没有从转换格式中提取到内容，尝试从原始格式提取
-      if (!extracted.content && choice.message?.content) {
+      const formattedChoice: LogEntry['response']['choices'][0] = {
+        index: choice.index || 0,
+        finish_reason: choice.finish_reason || 'stop',
+        message: {
+          role: 'assistant'
+        }
+      };
+
+      if (choice.message?.content) {
         const content = choice.message.content.trim();
         // 检查是否包含思考内容
         const thinkingMatch = content.match(/<thinking>([\s\S]*?)<\/thinking>/);
         if (thinkingMatch) {
-          extracted.thinking = thinkingMatch[1].trim();
+          formattedChoice.message.reasoning_content = thinkingMatch[1].trim();
           const contentWithoutThinking = content.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
           if (contentWithoutThinking) {
-            extracted.content = contentWithoutThinking;
+            formattedChoice.message.content = contentWithoutThinking;
           }
         } else {
-          extracted.content = content;
+          formattedChoice.message.content = content;
         }
       }
 
       // 提取工具调用（OpenAI格式）
-      if (choice.message?.tool_calls && !extracted.toolCalls) {
-        extracted.toolCalls = choice.message.tool_calls.map((call: any) => ({
-          name: call.function?.name,
-          arguments: typeof call.function?.arguments === 'string' 
-            ? JSON.parse(call.function.arguments) 
-            : call.function?.arguments,
+      if (choice.message?.tool_calls) {
+        formattedChoice.message.tool_calls = choice.message.tool_calls.map((call: any) => ({
+          id: call.id || `chatcmpl-tool-${Date.now()}`,
+          function: {
+            name: call.function?.name || '',
+            arguments: typeof call.function?.arguments === 'string' 
+              ? call.function.arguments 
+              : JSON.stringify(call.function?.arguments || {})
+          }
         }));
       }
 
-      // 提取完成原因
-      if (choice.finish_reason && !extracted.finishReason) {
-        extracted.finishReason = choice.finish_reason;
-      }
+      response.choices.push(formattedChoice);
     }
 
-    // 处理流式响应
-    if (responseData.streamChunks && responseData.finalResponse) {
-      // 从最终响应中提取内容
-      if (responseData.finalResponse.candidates?.[0]) {
-        const candidate = responseData.finalResponse.candidates[0];
-        
-        if (candidate.content?.parts) {
-          const textParts = candidate.content.parts
-            .filter((part: any) => part.text)
-            .map((part: any) => part.text)
-            .join('\n');
-          if (textParts.trim()) {
-            // 检查思考内容
-            const thinkingMatch = textParts.match(/<thinking>([\s\S]*?)<\/thinking>/);
-            if (thinkingMatch) {
-              extracted.thinking = thinkingMatch[1].trim();
-              const contentWithoutThinking = textParts.replace(/<thinking>[\s\S]*?<\/thinking>/g, '').trim();
-              if (contentWithoutThinking) {
-                extracted.content = contentWithoutThinking;
-              }
-            } else {
-              extracted.content = textParts.trim();
-            }
-          }
-
-          // 提取工具调用
-          const toolCalls = candidate.content.parts
-            .filter((part: any) => part.functionCall)
-            .map((part: any) => ({
-              name: part.functionCall.name,
-              arguments: part.functionCall.args,
-            }));
-          if (toolCalls.length > 0) {
-            extracted.toolCalls = toolCalls;
-          }
-        }
-
-        if (candidate.finishReason) {
-          extracted.finishReason = candidate.finishReason;
-        }
-      }
+    // 保存原始响应用于调试
+    if (responseData) {
+      response.raw = JSON.stringify(responseData);
     }
 
-    return extracted;
+    return response;
   }
 
   /**
-   * 记录模型请求到日志文件
+   * 开始记录请求，返回一个记录器实例
    * @param url API请求的URL
    * @param modelName 模型名称
    * @param requestData 发送给模型的完整请求数据
-   * @param vllmEndpoint vLLM部署的端点地址
-   * @returns 返回生成的请求ID
+   * @returns 返回记录器实例和请求ID
    */
-  async logRequest(url: string, modelName: string, requestData: any, vllmEndpoint: string): Promise<string> {
+  startLogging(url: string, modelName: string, requestData: any): { requestId: string; complete: (responseData: any, latencyMs: number, toolResponses?: ToolResponse[]) => Promise<void> } {
     const requestId = this.generateRequestId();
-    const logEntry: RequestLogEntry = {
-      requestId,
-      timestamp: this.formatTimestamp(),
-      url,
-      modelName,
-      requestData,
-      vllmConfig: {
-        deploymentFramework: 'vllm',
-        endpoint: vllmEndpoint,
-        modelPath: modelName,
-      },
+
+    const complete = async (responseData: any, latencyMs: number, toolResponses?: ToolResponse[]): Promise<void> => {
+      await this.logComplete(requestId, url, modelName, requestData, responseData, latencyMs, toolResponses);
     };
+
+    return { requestId, complete };
+  }
+
+  /**
+   * 记录完整的请求和响应到日志文件
+   * @param requestId 请求ID
+   * @param url API请求的URL
+   * @param modelName 模型名称
+   * @param requestData 发送给模型的完整请求数据
+   * @param responseData 模型返回的完整响应数据
+   * @param latencyMs 请求耗时（毫秒）
+   * @param toolResponses 工具调用返回结果
+   */
+  private async logComplete(
+    requestId: string, 
+    url: string, 
+    modelName: string, 
+    requestData: any, 
+    responseData: any, 
+    latencyMs: number,
+    toolResponses?: ToolResponse[]
+  ): Promise<void> {
+    const logEntry: LogEntry = {
+      timestamp: this.formatTimestamp(),
+      request: {
+        id: requestId,
+        url,
+        model: modelName,
+        stream: requestData.stream || false,
+        function_call: Boolean(requestData.tools || requestData.functions),
+        payload: {
+          messages: requestData.messages || [],
+          tools: requestData.tools,
+          tool_choice: requestData.tool_choice,
+          temperature: requestData.temperature,
+          max_tokens: requestData.max_tokens,
+          ...Object.fromEntries(
+            Object.entries(requestData).filter(([key]) => 
+              !['messages', 'tools', 'tool_choice', 'temperature', 'max_tokens'].includes(key)
+            )
+          )
+        }
+      },
+      response: this.extractResponseData(responseData, latencyMs)
+    };
+
+    // 添加工具响应
+    if (toolResponses && toolResponses.length > 0) {
+      logEntry.response.tool_responses = toolResponses;
+    }
 
     try {
       // 读取现有日志
-      let existingLogs: RequestLogEntry[] = [];
+      let existingLogs: LogEntry[] = [];
       try {
-        const fileContent = await fs.readFile(this.requestLogFilePath, 'utf-8');
+        const fileContent = await fs.readFile(this.logFilePath, 'utf-8');
         existingLogs = JSON.parse(fileContent);
       } catch (error) {
         // 文件不存在或解析失败，使用空数组
@@ -241,47 +305,59 @@ export class RequestLogger {
 
       // 写入文件，格式美观
       await fs.writeFile(
-        this.requestLogFilePath,
+        this.logFilePath,
         JSON.stringify(existingLogs, null, 2),
         'utf-8'
       );
-
-      return requestId;
     } catch (error) {
       console.error('Failed to write request log:', error);
-      return requestId;
     }
   }
 
   /**
-   * 记录模型响应到日志文件
-   * @param requestId 关联的请求ID
-   * @param responseData 模型返回的完整响应数据
+   * 兼容性方法：记录请求（保持向后兼容）
+   * @deprecated 建议使用 startLogging 方法
    */
-  async logResponse(requestId: string, responseData: any): Promise<void> {
-    const logEntry: ResponseLogEntry = {
-      requestId,
+  async logRequest(url: string, modelName: string, requestData: any, vllmEndpoint?: string): Promise<string> {
+    const { requestId } = this.startLogging(url, modelName, requestData);
+    return requestId;
+  }
+
+  /**
+   * 兼容性方法：记录响应（保持向后兼容）
+   * @deprecated 建议使用 startLogging 返回的 complete 方法
+   */
+  async logResponse(requestId: string, responseData: any, latencyMs: number = 0): Promise<void> {
+    // 这里需要从已有的请求日志中找到对应的请求信息
+    // 为了简化，暂时创建一个基本的日志条目
+    const logEntry: LogEntry = {
       timestamp: this.formatTimestamp(),
-      responseData: this.extractMeaningfulContent(responseData),
+      request: {
+        id: requestId,
+        url: 'unknown',
+        model: 'unknown',
+        stream: false,
+        function_call: false,
+        payload: {
+          messages: []
+        }
+      },
+      response: this.extractResponseData(responseData, latencyMs)
     };
 
     try {
-      // 读取现有日志
-      let existingLogs: ResponseLogEntry[] = [];
+      let existingLogs: LogEntry[] = [];
       try {
-        const fileContent = await fs.readFile(this.responseLogFilePath, 'utf-8');
+        const fileContent = await fs.readFile(this.logFilePath, 'utf-8');
         existingLogs = JSON.parse(fileContent);
       } catch (error) {
-        // 文件不存在或解析失败，使用空数组
         existingLogs = [];
       }
 
-      // 添加新的日志条目
       existingLogs.push(logEntry);
 
-      // 写入文件，格式美观
       await fs.writeFile(
-        this.responseLogFilePath,
+        this.logFilePath,
         JSON.stringify(existingLogs, null, 2),
         'utf-8'
       );
@@ -291,16 +367,25 @@ export class RequestLogger {
   }
 
   /**
-   * 获取请求日志文件路径
+   * 获取日志文件路径
    */
-  getRequestLogFilePath(): string {
-    return this.requestLogFilePath;
+  getLogFilePath(): string {
+    return this.logFilePath;
   }
 
   /**
-   * 获取响应日志文件路径
+   * 兼容性方法：获取请求日志文件路径
+   * @deprecated 建议使用 getLogFilePath
+   */
+  getRequestLogFilePath(): string {
+    return this.logFilePath;
+  }
+
+  /**
+   * 兼容性方法：获取响应日志文件路径
+   * @deprecated 建议使用 getLogFilePath
    */
   getResponseLogFilePath(): string {
-    return this.responseLogFilePath;
+    return this.logFilePath;
   }
 }
