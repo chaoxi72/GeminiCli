@@ -97,11 +97,24 @@ export class CustomLLMContentGenerator implements ContentGenerator {
     request: GenerateContentParameters,
   ): Promise<GenerateContentResponse> {
     const messages = ModelConverter.toOpenAIMessages(request);
-    const completion = await this.model.chat.completions.create({
+    const tools = extractToolFunctions(request.config) || [];
+    
+    // Check if JSON response is required
+    const isJsonRequired = request.config?.responseMimeType === 'application/json';
+    
+    const completionConfig: any = {
       messages,
       stream: false,
+      tools,
       ...this.config,
-    });
+    };
+    
+    // Add JSON response format if required
+    if (isJsonRequired) {
+      completionConfig.response_format = { type: "json_object" };
+    }
+    
+    const completion = await this.model.chat.completions.create(completionConfig);
 
     return ModelConverter.toGeminiResponse(completion);
   }
@@ -145,3 +158,4 @@ export class CustomLLMContentGenerator implements ContentGenerator {
     throw Error();
   }
 }
+
