@@ -75,6 +75,12 @@ export interface LogEntry {
 
 export class RequestLogger {
   private logFilePath: string;
+  private pendingRequests: Map<string, {
+    url: string;
+    modelName: string;
+    requestData: any;
+    startTime: number;
+  }> = new Map();
 
   constructor() {
     // 在用户临时目录下创建统一日志文件
@@ -233,9 +239,26 @@ export class RequestLogger {
    */
   startLogging(url: string, modelName: string, requestData: any): { requestId: string; complete: (responseData: any, latencyMs: number, toolResponses?: ToolResponse[]) => Promise<void> } {
     const requestId = this.generateRequestId();
+    const startTime = Date.now();
+
+    // 存储请求信息
+    this.pendingRequests.set(requestId, {
+      url,
+      modelName,
+      requestData,
+      startTime
+    });
 
     const complete = async (responseData: any, latencyMs: number, toolResponses?: ToolResponse[]): Promise<void> => {
-      await this.logComplete(requestId, url, modelName, requestData, responseData, latencyMs, toolResponses);
+      const requestInfo = this.pendingRequests.get(requestId);
+      if (requestInfo) {
+        await this.logComplete(requestId, requestInfo.url, requestInfo.modelName, requestInfo.requestData, responseData, latencyMs, toolResponses);
+        // 清理已完成的请求信息
+        this.pendingRequests.delete(requestId);
+      } else {
+        // 如果找不到请求信息，使用传入的参数作为备用
+        await this.logComplete(requestId, url, modelName, requestData, responseData, latencyMs, toolResponses);
+      }
     };
 
     return { requestId, complete };
@@ -328,22 +351,56 @@ export class RequestLogger {
    * @deprecated 建议使用 startLogging 返回的 complete 方法
    */
   async logResponse(requestId: string, responseData: any, latencyMs: number = 0): Promise<void> {
-    // 这里需要从已有的请求日志中找到对应的请求信息
-    // 为了简化，暂时创建一个基本的日志条目
-    const logEntry: LogEntry = {
-      timestamp: this.formatTimestamp(),
-      request: {
-        id: requestId,
-        url: 'unknown',
-        model: 'unknown',
-        stream: false,
-        function_call: false,
-        payload: {
-          messages: []
-        }
-      },
-      response: this.extractResponseData(responseData, latencyMs)
-    };
+    // 尝试从存储的请求信息中获取数据
+    const requestInfo = this.pendingRequests.get(requestId);
+    
+    let logEntry: LogEntry;
+    
+    if (requestInfo) {
+      // 如果找到了请求信息，使用完整的数据记录
+      logEntry = {
+        timestamp: this.formatTimestamp(),
+        request: {
+          id: requestId,
+          url: requestInfo.url,
+          model: requestInfo.modelName,
+          stream: requestInfo.requestData.stream || false,
+          function_call: Boolean(requestInfo.requestData.tools || requestInfo.requestData.functions),
+          payload: {
+            messages: requestInfo.requestData.messages || [],
+            tools: requestInfo.requestData.tools,
+            tool_choice: requestInfo.requestData.tool_choice,
+            temperature: requestInfo.requestData.temperature,
+            max_tokens: requestInfo.requestData.max_tokens,
+            ...Object.fromEntries(
+              Object.entries(requestInfo.requestData).filter(([key]) => 
+                !['messages', 'tools', 'tool_choice', 'temperature', 'max_tokens'].includes(key)
+              )
+            )
+          }
+        },
+        response: this.extractResponseData(responseData, latencyMs)
+      };
+      
+      // 清理已完成的请求信息
+      this.pendingRequests.delete(requestId);
+    } else {
+      // 如果找不到请求信息，创建基本的日志条目（向后兼容）
+      logEntry = {
+        timestamp: this.formatTimestamp(),
+        request: {
+          id: requestId,
+          url: 'unknown',
+          model: 'unknown',
+          stream: false,
+          function_call: false,
+          payload: {
+            messages: []
+          }
+        },
+        response: this.extractResponseData(responseData, latencyMs)
+      };
+    }
 
     try {
       let existingLogs: LogEntry[] = [];

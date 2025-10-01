@@ -76,17 +76,16 @@ export class CustomLLMContentGenerator implements ContentGenerator {
       ...this.config,
     };
 
-    // 记录请求日志并获取请求ID
-    const requestId = await this.requestLogger.logRequest(
+    // 使用新的日志记录方式
+    const { complete } = this.requestLogger.startLogging(
       `${this.baseURL}/chat/completions`,
       this.modelName,
-      requestConfig,
-      this.baseURL
+      requestConfig
     );
 
+    const startTime = Date.now();
     const stream = await this.model.chat.completions.create(requestConfig);
     const map: ToolCallMap = new Map();
-    const logger = this.requestLogger;
     
     return (async function* (): AsyncGenerator<GenerateContentResponse> {
       const streamChunks: any[] = [];
@@ -103,11 +102,12 @@ export class CustomLLMContentGenerator implements ContentGenerator {
       
       // 流式响应结束后，记录完整的响应日志
       if (streamChunks.length > 0) {
-        await logger.logResponse(requestId, {
+        const latencyMs = Date.now() - startTime;
+        await complete({
           streamChunks,
           finalResponse,
           totalChunks: streamChunks.length
-        });
+        }, latencyMs);
       }
     })();
   }
@@ -142,22 +142,23 @@ export class CustomLLMContentGenerator implements ContentGenerator {
       completionConfig.response_format = { type: "json_object" };
     }
 
-    // 记录请求日志并获取请求ID
-    const requestId = await this.requestLogger.logRequest(
+    // 使用新的日志记录方式
+    const { complete } = this.requestLogger.startLogging(
       `${this.baseURL}/chat/completions`,
       this.modelName,
-      completionConfig,
-      this.baseURL
+      completionConfig
     );
     
+    const startTime = Date.now();
     const completion = await this.model.chat.completions.create(completionConfig);
+    const latencyMs = Date.now() - startTime;
     const response = ModelConverter.toGeminiResponse(completion);
 
     // 记录响应日志
-    await this.requestLogger.logResponse(requestId, {
+    await complete({
       rawCompletion: completion,
       convertedResponse: response
-    });
+    }, latencyMs);
 
     return response;
   }
